@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+	<Task name="FemtoDstSkimmer" type="FemtoDstSkimmer" config="" nodePath="FDS" />
+
+	<mod>bg</mod>
+	<list>./list.lis</list>
+	
+	<FDS use="mlp">
+		<EventLoop progress="true" />
+		<input>
+			<dst treeName="FemtoDst" url="{list}" splitBy="1000" />
+		</input>
+
+		<output>
+			<TFile url="out/data_{mod}_{jobIndex}.root" />
+		</output>
+
+		<histograms>
+			<Histo name="bdt" title="bdt" bins_x="bins.bdt" />
+			<Histo name="mlp" title="mlp" bins_x="bins.mlp" />
+
+			<Histo name="pt_vs_bdt" title="bdt" bins_x="bins.bdt" bins_y="bins.pt" />
+			<Histo name="pt_vs_mlp" title="mlp" bins_x="bins.mlp" bins_y="bins.pt" />
+		</histograms>
+
+		<MuonMLPFilter min="-1" max="1.0">
+			<weights>/Users/jdb/bnl/local/work/MtdMuonPidMva/bin/weights/TMVAClassification_MLP_all.weights.xml</weights>
+		</MuonMLPFilter>
+
+		<MuonBDTFilter min="-1" max="1">
+			<weights>/Users/jdb/bnl/local/work/MtdMuonPidMva/bin/weights/TMVAClassification_-BDT-Run15-pp200-pT-lt-2p0-wo-nh-nsp-dca.weights.xml</weights>
+		</MuonBDTFilter>
+
+		<DeltaTOF>
+			<XmlFunction name="signal" formula="gaus" p0="1" p1="-4.01567e-02" p2="1.41013e-01" min="-1" max="1" Npx="1000"/>
+			<XmlHistogram name="bg" url="config/deltaTOF_pdfs.root" />
+		</DeltaTOF>
+	</FDS>
+
+
+
+	<bins>
+		<bdt min="-0.5" max="0.5" width="0.01" />
+		<mlp min="-1.5" max="1.5" width="0.01" />
+		<pt min="0" max="10" width="0.05" />
+	</bins>
+
+</config>
