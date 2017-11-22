@@ -27,6 +27,8 @@
 #include "XmlFunction.h"
 
 #include "TNtuple.h"
+#include "TRandom.h"
+#include "TRandom3.h"
 
 class FemtoDstSkimmer : public TreeAnalyzer
 {
@@ -44,8 +46,11 @@ protected:
 
 	XmlHistogram bg_deltaTOF;
 	XmlFunction sig_deltaTOF;
+	vector<TH1*> bg_deltaTOF_dY;
+	TH1 * bg_deltaTOF_dY_all;
 
 	TNtuple *tuple;
+	TRandom3 r3;
 public:
 	virtual const char* classname() const {return "FemtoDstSkimmer";}
 	FemtoDstSkimmer() {}
@@ -67,10 +72,41 @@ public:
 
 		tuple= new TNtuple( "MvaTree", "mva variables", "classId:dY:dZ:dTof:nsp:nhf:dca:cell:mod:bl:pt:c:bdt:mlp:gid" );
 
+		book->cd();
+
+		int seed= config.getInt( "seed", 0 );
+		r3.SetSeed( seed );
+		gRandom->SetSeed(r3.Integer( 32000 ));
+		LOG_F( INFO, "RANDOM SEED : %d", seed );
+
+		size_t nBgdTofBins = bg_deltaTOF.getTH1()->GetXaxis()->GetNbins() + 1;
+		TH2 * h2d = (TH2*) bg_deltaTOF.getTH1().get();
+		for ( size_t i = 1; i < nBgdTofBins; i++ ){
+			TH1 * h1d = h2d->ProjectionY( TString::Format( "bg_dTOF_%lu", i ), i, i );
+			h1d->Write();
+			bg_deltaTOF_dY.push_back( h1d );
+		}
+		bg_deltaTOF_dY_all = h2d->ProjectionY( "bg_dTOF_all" );
+
+
 	}
 
 
 protected:
+
+
+	float sample_bg_deltaTOF( float deltaY ){
+		int b = bg_deltaTOF.getTH1()->GetXaxis()->FindBin( deltaY );
+		if ( b >= 1 && b < bg_deltaTOF_dY.size() ){
+			float sdtof = bg_deltaTOF_dY[ b - 1]->GetRandom() + r3.Gaus( 0.0, 0.2 );
+			book->fill( "bg_dtof_vs_dY", deltaY, sdtof );
+			return sdtof;
+		}
+
+		float sdtof =bg_deltaTOF_dY_all->GetRandom();
+		book->fill( "bg_dtof_vs_dY", deltaY, sdtof );
+		return sdtof;
+	} 
 
 	virtual void preEventLoop(){
 		TreeAnalyzer::preEventLoop();
@@ -191,10 +227,12 @@ protected:
 			double deltaTof = -999;
 			if ( isMuon( mcTrack  )){
 				// LOG_F( INFO, "Signal" );
-				deltaTof = sig_deltaTOF.getTF1()->GetRandom();
+				float sdtof = sig_deltaTOF.getTF1()->GetRandom();
+				book->fill( "signal_dtof", sdtof );
+				deltaTof = sdtof;
 			} else {
 				// LOG_F( INFO, "Background" );
-				deltaTof = bg_deltaTOF.getTH1()->GetRandom();
+				deltaTof = sample_bg_deltaTOF( _proxy._mtdPid->mDeltaY );// bg_deltaTOF.getTH1()->GetRandom();
 			}
 
 			_proxy._mtdPid->mDeltaTimeOfFlight = deltaTof;
@@ -219,12 +257,14 @@ protected:
 			if ( isDecayMuonInsideTPC( mcTrack ) ){
 				classId = 1;
 			}
-			if ( cleanPunchThrough( _proxy._mtdPid, track, mcTrack ) ){
-				classId = 3;
-			}
+			
+			// if ( cleanPunchThrough( _proxy._mtdPid, track, mcTrack ) ){
+			// 	classId = 3;
+			// }
+			
 			if ( isSignal( mcTrack ) ){
 
-				classId = 4;
+				classId = 5;
 			}
 
 			float data[] = {

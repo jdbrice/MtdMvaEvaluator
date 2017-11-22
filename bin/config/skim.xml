@@ -2,13 +2,13 @@
 <config>
 	<Task name="FemtoDstSkimmer" type="FemtoDstSkimmer" config="" nodePath="FDS" />
 
-	<mod>bg</mod>
+	<mod>dtof_dy_corr</mod>
 	<list>./list.lis</list>
 	
 	<FDS use="mlp">
 		<EventLoop progress="true" />
 		<input>
-			<dst treeName="FemtoDst" url="{list}" splitBy="1000" />
+			<dst treeName="FemtoDst" url="{list}" splitBy="1000" nEvents="1000" />
 		</input>
 
 		<output>
@@ -21,6 +21,9 @@
 
 			<Histo name="pt_vs_bdt" title="bdt" bins_x="bins.bdt" bins_y="bins.pt" />
 			<Histo name="pt_vs_mlp" title="mlp" bins_x="bins.mlp" bins_y="bins.pt" />
+
+			<Histo name="signal_dtof" title="signal dtof as sampled" bins_x="bins.dtof" />
+			<Histo name="bg_dtof_vs_dY" title="bg dtof as sampled" bins_x="bins.dY" bins_y="bins.dtof" />
 		</histograms>
 
 		<MuonMLPFilter min="-1" max="1.0">
@@ -33,7 +36,7 @@
 
 		<DeltaTOF>
 			<XmlFunction name="signal" formula="gaus" p0="1" p1="-4.01567e-02" p2="1.41013e-01" min="-1" max="1" Npx="1000"/>
-			<XmlHistogram name="bg" url="config/deltaTOF_pdfs.root" />
+			<XmlHistogram name="bg_vs_dY" url="config/deltaTOF_pdfs.root" />
 		</DeltaTOF>
 	</FDS>
 
@@ -43,6 +46,9 @@
 		<bdt min="-0.5" max="0.5" width="0.01" />
 		<mlp min="-1.5" max="1.5" width="0.01" />
 		<pt min="0" max="10" width="0.05" />
+
+		<dY min="-70" max="70" width="1" />
+		<dtof min="-25" max="25" width="0.05" />
 	</bins>
 
 </config>
