@@ -2,13 +2,13 @@
 <config>
 	<Task name="FemtoDstSkimmer" type="FemtoDstSkimmer" config="" nodePath="FDS" />
 
-	<mod>dtof_dy_corr</mod>
+	<mod>pions_dtof_dy_corr</mod>
 	<list>./list.lis</list>
 	
 	<FDS use="mlp">
 		<EventLoop progress="true" />
 		<input>
-			<dst treeName="FemtoDst" url="{list}" splitBy="1000" nEvents="1000" />
+			<dst treeName="FemtoDst" url="{list}" splitBy="1000"  />
 		</input>
 
 		<output>
