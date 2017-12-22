@@ -18,7 +18,9 @@ class MuonMLPFilter {
 public:
 
 
-	shared_ptr<TMVA::Reader> reader = nullptr;
+
+	string name = "MLP";
+	static shared_ptr<TMVA::Reader> reader;
 	// MLP variables
 	Float_t MVA_dY;
 	Float_t MVA_dZ;
@@ -56,33 +58,41 @@ public:
 		MVA_Pt         = _proxy._track->mPt;
 		MVA_Charge     = (Float_t)_proxy._track->charge();
 
-		return reader->EvaluateMVA( "MLP" );
+		MVA_dY        *= MVA_Charge;
+
+		return reader->EvaluateMVA( this->name.c_str() );
+	}
+
+	void load( string _weight_file, string _name = "MLP" ){
+
+		this->name=_name;
+		LOG_F( INFO, "Loading MLP weights from : %s", _weight_file.c_str() );
+
+		if ( nullptr == reader ){
+			reader = shared_ptr<TMVA::Reader>(new TMVA::Reader( "!Color:!Silent" ) ); 
+		
+			reader->AddVariable( "qdY := (MtdPidTraits_mDeltaY * Tracks_mCharge)", &MVA_dY );
+			reader->AddVariable( "dZ := MtdPidTraits_mDeltaZ", &MVA_dZ );
+			reader->AddVariable( "nSigmaPi := Tracks_mNSigmaPion", &MVA_nSigmaPion );
+			// reader->AddVariable( "nh := Tracks_mNHitsFit", &MVA_nHitsFit );
+			reader->AddVariable( "dca := Tracks_mDCA", &MVA_DCA );
+			reader->AddVariable( "Cell := MtdPidTraits_mCell", &MVA_Cell );
+			reader->AddVariable( "Module := MtdPidTraits_mModule", &MVA_Module );
+			reader->AddVariable( "BL := MtdPidTraits_mBL", &MVA_BL );
+			// reader->AddVariable( "pT := Tracks_mPt", &MVA_Pt );
+			reader->AddVariable( "charge := Tracks_mCharge", &MVA_Charge );
+			reader->AddVariable( "dTof := MtdPidTraits_mDeltaTOF", &MVA_dTof );
+		}
+
+
+		reader->BookMVA( this->name.c_str(), _weight_file.c_str() ); 
 	}
 
 	void load( XmlConfig &_cfg, string _nodePath ){
 		
 		string weights_xml = _cfg.getString( _nodePath + ".weights" );
-		LOG_F( INFO, "Loading MLP weights from : %s", weights_xml.c_str() );
-
-		reader = shared_ptr<TMVA::Reader>(new TMVA::Reader( "!Color:!Silent" ) ); 
-		
-		reader->AddVariable( "dY := (MtdPidTraits_mDeltaY)", &MVA_dY );
-		reader->AddVariable( "dZ := MtdPidTraits_mDeltaZ", &MVA_dZ );
-		reader->AddVariable( "nSigmaPi := Tracks_mNSigmaPion", &MVA_nSigmaPion );
-		reader->AddVariable( "nh := Tracks_mNHitsFit", &MVA_nHitsFit );
-		reader->AddVariable( "dca := Tracks_mDCA", &MVA_DCA );
-		reader->AddVariable( "Cell := MtdPidTraits_mCell", &MVA_Cell );
-		reader->AddVariable( "Module := MtdPidTraits_mModule", &MVA_Module );
-		reader->AddVariable( "BL := MtdPidTraits_mBL", &MVA_BL );
-		reader->AddVariable( "pT := Tracks_mPt", &MVA_Pt );
-		reader->AddVariable( "charge := Tracks_mCharge", &MVA_Charge );
-		reader->AddVariable( "dTof := MtdPidTraits_mDeltaTOF", &MVA_dTof );
-
-
-		reader->BookMVA( "MLP", weights_xml.c_str() ); 
-
+		load( weights_xml );
 		signal_range.loadConfig( _cfg, _nodePath + ".Range" );
-
 	}
 
 	bool pass( FemtoTrackProxy &_proxy ){

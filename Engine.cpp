@@ -11,6 +11,7 @@ using namespace jdb;
 
 
 #include "FemtoDstSkimmer/FemtoDstSkimmer.h"
+shared_ptr<TMVA::Reader> MuonMLPFilter::reader = nullptr;
 
 #define LOGURU_IMPLEMENTATION 1
 #include "vendor/loguru.h"

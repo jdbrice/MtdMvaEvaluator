@@ -4,15 +4,17 @@
 
 	<mod>pions_dtof_dy_corr</mod>
 	<list>./list.lis</list>
+
+	<ptIndex>0</ptIndex>
 	
 	<FDS use="mlp">
 		<EventLoop progress="true" />
 		<input>
-			<dst treeName="FemtoDst" url="{list}" splitBy="1000"  />
+			<dst treeName="FemtoDst" url="{list}"  />
 		</input>
 
 		<output>
-			<TFile url="out/data_{mod}_{jobIndex}.root" />
+			<TFile url="out/data_{mod}_{ptIndex}.root" />
 		</output>
 
 		<histograms>
@@ -27,25 +29,27 @@
 		</histograms>
 
 		<MuonMLPFilter min="-1" max="1.0">
-			<weights>/Users/jdb/bnl/local/work/MtdMuonPidMva/bin/weights/TMVAClassification_MLP_all.weights.xml</weights>
+			<weights>/home/jdb12/work/dimuonAna/TrainMVA/bin/weights/TMVAClassification_MLP_Np10Np12_%d.weights.xml</weights>
 		</MuonMLPFilter>
 
 		<MuonBDTFilter min="-1" max="1">
-			<weights>/Users/jdb/bnl/local/work/MtdMuonPidMva/bin/weights/TMVAClassification_-BDT-Run15-pp200-pT-lt-2p0-wo-nh-nsp-dca.weights.xml</weights>
+			<weights>/home/jdb12/work/dimuonAna/TrainMVA/bin/weights/TMVAClassification_BDT_Np10Np12.weights.xml</weights>
 		</MuonBDTFilter>
 
 		<DeltaTOF>
-			<XmlFunction name="signal" formula="gaus" p0="1" p1="-4.01567e-02" p2="1.41013e-01" min="-1" max="1" Npx="1000"/>
-			<XmlHistogram name="bg_vs_dY" url="config/deltaTOF_pdfs.root" />
+			<XmlHistogram name="hsignalPdf" url="config/sig_deltaTOF_pdfs.root" />
+			<XmlHistogram name="bg" url="config/deltaTOF_pdfs_no_pt_dep.root" />
 		</DeltaTOF>
 	</FDS>
 
 
 
 	<bins>
+		<mlp_pt>1.00, 1.10, 1.20, 1.30, 1.40, 1.50, 1.60, 1.70, 1.80, 1.90, 2.00, 2.25, 2.50, 2.75, 3.00, 4.00, 5.00, 6.00, 7.00, 8.00, 9.00, 10.00, 11.00, 12.00, 13.00, 14.00, 15.00</mlp_pt>
+		<!-- <mlp_pt>0.0, 15.0</mlp_pt> -->
 		<bdt min="-0.5" max="0.5" width="0.01" />
 		<mlp min="-1.5" max="1.5" width="0.01" />
-		<pt min="0" max="10" width="0.05" />
+		<dtof_pt min="0" max="15" width="0.01" />
 
 		<dY min="-70" max="70" width="1" />
 		<dtof min="-25" max="25" width="0.05" />

@@ -56,6 +56,8 @@ public:
 		MVA_Pt         = _proxy._track->mPt;
 		MVA_Charge     = (Float_t)_proxy._track->charge();
 
+		MVA_dY        *= MVA_Charge;
+
 		float bdt = reader->EvaluateMVA( "BDT" );
 
 		// LOG_F( INFO, "MVA_dY = %f ", MVA_dY );
@@ -82,15 +84,15 @@ public:
 
 		reader = shared_ptr<TMVA::Reader>(new TMVA::Reader( "!Color:!Silent" ) ); 
 		
-		reader->AddVariable( "dY := (MtdPidTraits_mDeltaY)", &MVA_dY );
+		reader->AddVariable( "qdY := (MtdPidTraits_mDeltaY * Tracks_mCharge)", &MVA_dY );
 		reader->AddVariable( "dZ := MtdPidTraits_mDeltaZ", &MVA_dZ );
-		// reader->AddVariable( "nSigmaPi := Tracks_mNSigmaPion", &MVA_nSigmaPion );
+		reader->AddVariable( "nSigmaPi := Tracks_mNSigmaPion", &MVA_nSigmaPion );
 		// reader->AddVariable( "nh := Tracks_mNHitsFit", &MVA_nHitsFit );
-		// reader->AddVariable( "dca := Tracks_mDCA", &MVA_DCA );
+		reader->AddVariable( "dca := Tracks_mDCA", &MVA_DCA );
 		reader->AddVariable( "Cell := MtdPidTraits_mCell", &MVA_Cell );
 		reader->AddVariable( "Module := MtdPidTraits_mModule", &MVA_Module );
 		reader->AddVariable( "BL := MtdPidTraits_mBL", &MVA_BL );
-		reader->AddVariable( "pT := Tracks_mPt", &MVA_Pt );
+		// reader->AddVariable( "pT := Tracks_mPt", &MVA_Pt );
 		reader->AddVariable( "charge := Tracks_mCharge", &MVA_Charge );
 		reader->AddVariable( "dTof := MtdPidTraits_mDeltaTOF", &MVA_dTof );
 

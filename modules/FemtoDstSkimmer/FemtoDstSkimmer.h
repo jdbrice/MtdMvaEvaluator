@@ -41,13 +41,18 @@ protected:
 	TClonesArrayReader<FemtoTrackHelix> _rHelices;
 	TClonesArrayReader<FemtoMtdPidTraits> _rMtdPid;
 
+	int ptIndex = 0;
+	vector <MuonMLPFilter> mlps;
 	MuonMLPFilter mlp;
 	MuonBDTFilter bdt;
 
 	XmlHistogram bg_deltaTOF;
-	XmlFunction sig_deltaTOF;
-	vector<TH1*> bg_deltaTOF_dY;
-	TH1 * bg_deltaTOF_dY_all;
+	XmlHistogram sig_deltaTOF_2d;
+	vector<TH1*> sig_deltaTOF_pt;
+	TH1 * sig_deltaTOF_pt_all;
+
+	HistoBins bins_pt_mlp;
+	HistoBins bins_pt_dtof;
 
 	TNtuple *tuple;
 	TRandom3 r3;
@@ -64,11 +69,18 @@ public:
 		_rMcTracks.setup( chain, "McTracks" );
 		_rMtdPid.setup( chain, "MtdPidTraits" );
 
-		mlp.load( config, nodePath + ".MuonMLPFilter" );
+		
 		bdt.load( config, nodePath + ".MuonBDTFilter" );
 
-		bg_deltaTOF.load( config, nodePath + ".DeltaTOF.XmlHistogram" );
-		sig_deltaTOF.set( config, nodePath + ".DeltaTOF.XmlFunction" );
+
+		string path_bg = config.q( nodePath+".DeltaTOF.XmlHistogram{name==bg}" );
+		string path_sig = config.q( nodePath+".DeltaTOF.XmlHistogram{name==hsignalPdf}" );
+		
+		LOG_F( INFO, "Loading bg from : %s", path_bg.c_str()  );
+		LOG_F( INFO, "Loading sig from : %s", path_sig.c_str()  );
+
+		bg_deltaTOF.load( config, path_bg );
+		sig_deltaTOF_2d.load( config, path_sig );
 
 		tuple= new TNtuple( "MvaTree", "mva variables", "classId:dY:dZ:dTof:nsp:nhf:dca:cell:mod:bl:pt:c:bdt:mlp:gid" );
 
@@ -79,15 +91,42 @@ public:
 		gRandom->SetSeed(r3.Integer( 32000 ));
 		LOG_F( INFO, "RANDOM SEED : %d", seed );
 
-		size_t nBgdTofBins = bg_deltaTOF.getTH1()->GetXaxis()->GetNbins() + 1;
-		TH2 * h2d = (TH2*) bg_deltaTOF.getTH1().get();
-		for ( size_t i = 1; i < nBgdTofBins; i++ ){
-			TH1 * h1d = h2d->ProjectionY( TString::Format( "bg_dTOF_%lu", i ), i, i );
-			h1d->Write();
-			bg_deltaTOF_dY.push_back( h1d );
-		}
-		bg_deltaTOF_dY_all = h2d->ProjectionY( "bg_dTOF_all" );
 
+		bins_pt_mlp.load( config, "bins.mlp_pt" );
+		ptIndex = config.get<int>( "ptIndex" );
+		if ( ptIndex < 0 ){
+			LOG_F( INFO, "ptIndex < 0 --> resetting to 0" );
+			ptIndex = 0;
+		} else if ( ptIndex > bins_pt_mlp.nBins() ){
+			LOG_F( INFO, "ptIndex > %d --> resetting to %d", bins_pt_mlp.nBins(), bins_pt_mlp.nBins() );
+			ptIndex = bins_pt_mlp.nBins();
+		}
+		string template_str = config.getString( nodePath + ".MuonMLPFilter.weights" );
+		mlp.load( string( TString::Format( template_str.c_str(), ptIndex ) ) );
+
+		for ( size_t i = 0; i < bins_pt_mlp.nBins(); i++ ){
+			MuonMLPFilter m;
+			m.load( string( TString::Format( template_str.c_str(), i ) ), string( TString::Format( "mlp_%d", i ) ) );
+			mlps.push_back( m );
+		}
+
+		
+
+		// build the signal dtof 1d histos
+		TH2 * h2 = (TH2*)sig_deltaTOF_2d.getTH1().get();
+		bins_pt_dtof.load( config, "bins.dtof_pt" );
+		size_t nPtBinsDtof = bins_pt_dtof.nBins();
+		for ( size_t i = 0; i < nPtBinsDtof; i++ ){
+			int ib1 = h2->GetXaxis()->FindBin( bins_pt_dtof.bins[i] );
+			int ib2 = h2->GetXaxis()->FindBin( bins_pt_dtof.bins[i+1] );
+			LOG_F( 3, "Projecting ( %f -> %f )", bins_pt_dtof.bins[i], bins_pt_dtof.bins[i+1] );
+			TH1 * h1 = h2->ProjectionY( TString::Format( "sig_dtof_pt_%zu", i ), ib1, ib2 );
+			sig_deltaTOF_pt.push_back( h1 );
+			h1->Write();
+		}
+		sig_deltaTOF_pt_all = h2->ProjectionY( "sig_dtof_pt_all", 1, -1 );
+
+		LOG_F( INFO, "[%d] => pT Range : %f <= pT < %f", ptIndex, bins_pt_mlp.bins[ptIndex], bins_pt_mlp.bins[ptIndex+1] );
 
 	}
 
@@ -95,23 +134,147 @@ public:
 protected:
 
 
-	float sample_bg_deltaTOF( float deltaY ){
-		int b = bg_deltaTOF.getTH1()->GetXaxis()->FindBin( deltaY );
-		if ( b >= 1 && b < bg_deltaTOF_dY.size() ){
-			float sdtof = bg_deltaTOF_dY[ b - 1]->GetRandom() + r3.Gaus( 0.0, 0.2 );
-			book->fill( "bg_dtof_vs_dY", deltaY, sdtof );
-			return sdtof;
+	float sample_bg_deltaTOF( ){
+		return bg_deltaTOF.getTH1().get()->GetRandom();
+	} 
+	float sample_sig_deltaTOF( FemtoTrackProxy &proxy ){
+		LOG_F( 3, "pT=%f ", proxy._track->mPt );
+
+		int ib = bins_pt_dtof.findBin( proxy._track->mPt );
+		LOG_F( 3, "ib=%d", ib );
+		if ( ib < sig_deltaTOF_pt.size() && ib >= 0){
+			LOG_F( 3, "h1: %s", sig_deltaTOF_pt[ib]->GetName() );
+			return sig_deltaTOF_pt[ib]->GetRandom();
 		}
 
-		float sdtof =bg_deltaTOF_dY_all->GetRandom();
-		book->fill( "bg_dtof_vs_dY", deltaY, sdtof );
-		return sdtof;
+		
+		return sig_deltaTOF_pt_all->GetRandom();
 	} 
 
 	virtual void preEventLoop(){
 		TreeAnalyzer::preEventLoop();
 		book->cd();
 	}
+
+	virtual void analyzeTrack( FemtoTrackProxy &_proxy ){
+		
+		int ipt = bins_pt_mlp.findBin( _proxy._track->mPt );
+		if ( ipt < 0 ) return;
+		// if ( ipt != ptIndex ) return;
+
+		MuonMLPFilter &_mlp = mlps[ipt];
+
+		float classId = 0; // bg
+		
+		if ( isDecayMuonOutsideTPC( _proxy._mtdPid, _proxy._mcTrack ) ){
+			classId = 2;
+		}
+		if ( isDecayMuonInsideTPC( _proxy._mcTrack ) ){
+			return;
+			classId = 1;
+		}
+		
+		// if ( cleanPunchThrough( _proxy._mtdPid, track, mcTrack ) ){
+		// 	classId = 3;
+		// }
+		
+		if ( isSignal( _proxy._mcTrack ) ){
+
+			classId = 5;
+		}
+
+
+		/************************************
+		* Sample dTOF distribution for sig/bg
+		************************************/
+		double deltaTof = -999;
+		if ( isSignal( _proxy._mcTrack  )){
+			float sdtof = sample_sig_deltaTOF( _proxy );
+			// book->fill( "signal_dtof", sdtof );
+			deltaTof = sdtof;
+		} else {
+			deltaTof = sample_bg_deltaTOF( );
+		}
+
+
+		_proxy._mtdPid->mDeltaTimeOfFlight = deltaTof;
+
+		float mlpr = _mlp.evaluate( _proxy );
+		float bdtr = bdt.evaluate( _proxy );
+
+
+
+		float data[] = {
+			classId,
+			_proxy._mtdPid->mDeltaY,
+			_proxy._mtdPid->mDeltaZ,
+			_proxy._mtdPid->mDeltaTimeOfFlight,
+			_proxy._track->nSigmaPion(),
+			(Float_t)fabs(_proxy._track->mNHitsFit),
+			_proxy._track->gDCA(),
+			(Float_t)_proxy._mtdPid->cell(),
+			(Float_t)_proxy._mtdPid->module(),
+			(Float_t)_proxy._mtdPid->backleg(),
+			_proxy._track->mPt,
+			(Float_t)_proxy._track->charge(),
+			bdtr,
+			mlpr,
+			(float)_proxy._mcTrack->mGeantPID
+		};
+		tuple->Fill( data );
+	}
+
+	virtual void analyzeEvent(){
+		// return;
+		_event = _rEvent.get();
+
+		size_t nTracks = _rTracks.N();
+		FemtoTrackProxy _proxy;
+
+		for (size_t i = 0; i < nTracks; i++ ){
+			
+			FemtoTrack        *track   = _rTracks.get(i);
+			FemtoMcTrack      *mcTrack = nullptr;
+			FemtoMtdPidTraits *mtdPid  = nullptr;
+
+			// get MTD PidTraits
+			if ( track->mMtdPidTraitsIndex >= 0) 
+				mtdPid = _rMtdPid.get( track->mMtdPidTraitsIndex );
+
+			// get MC Track 
+			if ( track->mMcIndex >= 0 )
+				mcTrack = _rMcTracks.get( track->mMcIndex );
+
+			// Reject if one is missing
+			if ( nullptr == mtdPid || nullptr == mcTrack )
+				continue;
+
+			FemtoTrackProxy _proxy;
+			_proxy._track = track;
+			_proxy._mtdPid = mtdPid;
+			_proxy._mcTrack = mcTrack;
+
+			analyzeTrack( _proxy );
+
+		}
+
+		
+
+	}
+
+
+	/* Post Event Loop
+	 * Adds config and writes tuple
+	 */
+	virtual void postEventLoop(){
+		tuple->Write();
+		TreeAnalyzer::postEventLoop();
+
+		if ( 0 == config.getInt( "jobIndex" ) || -1 == config.getInt( "jobIndex" ) ){
+			TNamed config_str( "config", config.toXml() );
+			config_str.Write();
+		}
+	} // postEventLoop
 
 	bool isMuon( FemtoMcTrack * mcTrack ){
 		if ( nullptr == mcTrack )
@@ -177,130 +340,6 @@ protected:
 			return true;
 
 		return false;
-	}
-
-	virtual void analyzeEvent(){
-	
-		_event = _rEvent.get();
-
-		size_t nTracks = _rTracks.N();
-		FemtoTrackProxy _proxy;
-
-		for (size_t i = 0; i < nTracks; i++ ){
-			
-			FemtoTrack * track = _rTracks.get(i);
-			FemtoMcTrack * mcTrack = nullptr;
-			FemtoMtdPidTraits *mtdPid = nullptr;
-
-			if ( track->mMtdPidTraitsIndex >= 0) 
-				mtdPid = _rMtdPid.get( track->mMtdPidTraitsIndex );
-			if ( track->mMcIndex >= 0 )
-				mcTrack = _rMcTracks.get( track->mMcIndex );
-
-			if ( nullptr == mtdPid || nullptr == mcTrack )
-				continue;
-
-			FemtoTrackProxy _proxy;
-			_proxy._track = track;
-			_proxy._mtdPid = mtdPid;
-			_proxy._mcTrack = mcTrack;
-
-			bool inTPC = isDecayMuonInsideTPC(mcTrack);
-			bool outTPC = isDecayMuonOutsideTPC( mtdPid, mcTrack );
-			// if ( inTPC != decayInsideTPC ){
-			// 	continue;
-			// }
-			// if ( outTPC != true ){
-			// 	continue;
-			// }
-
-			// _proxy.assemble( i, _rTracks, _rMtdPid );
-			// if ( nullptr == _proxy._mtdPid  ) continue;
-			// // LOG_F( INFO, "Track Mc Index=%d", _proxy._track->mMcIndex );
-
-			// FemtoMcTrack * mcTrack = nullptr;
-			// if ( _proxy._track->mMcIndex >= 0 )
-			// 	mcTrack = _rMcTracks.get( _proxy._track->mMcIndex );
-
-			// if ( nullptr == mcTrack  ) continue;
-
-			double deltaTof = -999;
-			if ( isMuon( mcTrack  )){
-				// LOG_F( INFO, "Signal" );
-				float sdtof = sig_deltaTOF.getTF1()->GetRandom();
-				book->fill( "signal_dtof", sdtof );
-				deltaTof = sdtof;
-			} else {
-				// LOG_F( INFO, "Background" );
-				deltaTof = sample_bg_deltaTOF( _proxy._mtdPid->mDeltaY );// bg_deltaTOF.getTH1()->GetRandom();
-			}
-
-			_proxy._mtdPid->mDeltaTimeOfFlight = deltaTof;
-
-			// if ( _proxy._track->mPt < 2.0  ) continue;
-			float mlpr = mlp.evaluate( _proxy );
-			float bdtr = bdt.evaluate( _proxy );
-			
-			// book->fill( "mlp", mlpr );
-			// book->fill( "bdt", bdtr );
-
-			// book->fill( "pt_vs_mlp", mlpr, _proxy._track->mPt );
-			// book->fill( "pt_vs_bdt", bdtr, _proxy._track->mPt );
-
-			// LOG_F( INFO, "mGeantPID=%d", mcTrack->mGeantPID  );
-
-			float classId = 0; // bg
-			
-			if ( isDecayMuonOutsideTPC( _proxy._mtdPid, mcTrack ) ){
-				classId = 2;
-			}
-			if ( isDecayMuonInsideTPC( mcTrack ) ){
-				classId = 1;
-			}
-			
-			// if ( cleanPunchThrough( _proxy._mtdPid, track, mcTrack ) ){
-			// 	classId = 3;
-			// }
-			
-			if ( isSignal( mcTrack ) ){
-
-				classId = 5;
-			}
-
-			float data[] = {
-				classId,
-				_proxy._mtdPid->mDeltaY,
-				_proxy._mtdPid->mDeltaZ,
-				_proxy._mtdPid->mDeltaTimeOfFlight,
-				_proxy._track->nSigmaPion(),
-				(Float_t)fabs(_proxy._track->mNHitsFit),
-				_proxy._track->gDCA(),
-				(Float_t)_proxy._mtdPid->cell(),
-				(Float_t)_proxy._mtdPid->module(),
-				(Float_t)_proxy._mtdPid->backleg(),
-				_proxy._track->mPt,
-				(Float_t)_proxy._track->charge(),
-				bdtr,
-				mlpr,
-				(float)_proxy._mcTrack->mGeantPID
-			};
-			tuple->Fill( data );
-		}
-
-		
-
-	}
-
-
-	virtual void postEventLoop(){
-		tuple->Write();
-		TreeAnalyzer::postEventLoop();
-
-		if ( 0 == config.getInt( "jobIndex" ) || -1 == config.getInt( "jobIndex" ) ){
-			TNamed config_str( "config", config.toXml() );
-			config_str.Write();
-		}
-		
 	}
 	
 };
