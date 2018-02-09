@@ -31,3 +31,9 @@
 
 Dictionary*
 \.sconsign\.dblite
+
+# Data files
+*.root
+*.log
+*.lis
+bin/sub.sh

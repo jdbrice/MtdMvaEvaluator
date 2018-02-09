@@ -14,8 +14,9 @@
 #include "FemtoDstFormat/FemtoMtdPidTraits.h"
 #include "FemtoDstFormat/FemtoTrackProxy.h"
 
-#include "Filters/MuonBDTFilter.h"
-#include "Filters/MuonMLPFilter.h"
+// #include "Filters/MuonBDTFilter.h"
+// #include "Filters/MuonMLPFilter.h"
+#include "Filters/MuonMVAFilter.h"
 
 
 
@@ -42,16 +43,15 @@ protected:
 	TClonesArrayReader<FemtoMtdPidTraits> _rMtdPid;
 
 	int ptIndex = 0;
-	vector <MuonMLPFilter> mlps;
-	MuonMLPFilter mlp;
-	MuonBDTFilter bdt;
+	vector <MuonMVAFilter> mlps;
+	vector <MuonMVAFilter> bdts;
 
 	XmlHistogram bg_deltaTOF;
 	XmlHistogram sig_deltaTOF_2d;
 	vector<TH1*> sig_deltaTOF_pt;
 	TH1 * sig_deltaTOF_pt_all;
 
-	HistoBins bins_pt_mlp;
+	HistoBins bins_pt_mva;
 	HistoBins bins_pt_dtof;
 
 	TNtuple *tuple;
@@ -70,8 +70,7 @@ public:
 		_rMtdPid.setup( chain, "MtdPidTraits" );
 
 		
-		bdt.load( config, nodePath + ".MuonBDTFilter" );
-
+		// bdt.load( config, nodePath + ".MuonBDTFilter" );
 
 		string path_bg = config.q( nodePath+".DeltaTOF.XmlHistogram{name==bg}" );
 		string path_sig = config.q( nodePath+".DeltaTOF.XmlHistogram{name==hsignalPdf}" );
@@ -91,26 +90,28 @@ public:
 		gRandom->SetSeed(r3.Integer( 32000 ));
 		LOG_F( INFO, "RANDOM SEED : %d", seed );
 
+		bins_pt_mva.load( config, "bins.mva_pt" );
+		string mlp_template_str = config.getString( nodePath + ".MuonMVAFilter.WeightsMLP" );
+		string bdt_template_str = config.getString( nodePath + ".MuonMVAFilter.WeightsBDT" );
 
-		bins_pt_mlp.load( config, "bins.mlp_pt" );
-		ptIndex = config.get<int>( "ptIndex" );
-		if ( ptIndex < 0 ){
-			LOG_F( INFO, "ptIndex < 0 --> resetting to 0" );
-			ptIndex = 0;
-		} else if ( ptIndex > bins_pt_mlp.nBins() ){
-			LOG_F( INFO, "ptIndex > %d --> resetting to %d", bins_pt_mlp.nBins(), bins_pt_mlp.nBins() );
-			ptIndex = bins_pt_mlp.nBins();
-		}
-		string template_str = config.getString( nodePath + ".MuonMLPFilter.weights" );
-		mlp.load( string( TString::Format( template_str.c_str(), ptIndex ) ) );
+		/* LOAD THE MLPs */
+		// use this first one to setup the sinlgeton reader and load the variables
+		MuonMVAFilter m_setup;
+		m_setup.loadVars( config, nodePath + ".MuonMVAFilter" );
 
-		for ( size_t i = 0; i < bins_pt_mlp.nBins(); i++ ){
-			MuonMLPFilter m;
-			m.load( string( TString::Format( template_str.c_str(), i ) ), string( TString::Format( "mlp_%d", i ) ) );
+		for ( size_t i = 0; i < bins_pt_mva.nBins(); i++ ){
+			MuonMVAFilter m;
+			m.load( string( TString::Format( mlp_template_str.c_str(), i ) ), string( TString::Format( "mlp_%zu", i ) ) );
 			mlps.push_back( m );
 		}
 
-		
+		/* LOAD THE BDTs */
+		for ( size_t i = 0; i < bins_pt_mva.nBins(); i++ ){
+			MuonMVAFilter m;
+			m.load( string( TString::Format( bdt_template_str.c_str(), i ) ), string( TString::Format( "bdt_%zu", i ) ) );
+			bdts.push_back( m );
+		}
+
 
 		// build the signal dtof 1d histos
 		TH2 * h2 = (TH2*)sig_deltaTOF_2d.getTH1().get();
@@ -126,7 +127,7 @@ public:
 		}
 		sig_deltaTOF_pt_all = h2->ProjectionY( "sig_dtof_pt_all", 1, -1 );
 
-		LOG_F( INFO, "[%d] => pT Range : %f <= pT < %f", ptIndex, bins_pt_mlp.bins[ptIndex], bins_pt_mlp.bins[ptIndex+1] );
+		LOG_F( INFO, "[%d] => pT Range : %f <= pT < %f", ptIndex, bins_pt_mva.bins[ptIndex], bins_pt_mva.bins[ptIndex+1] );
 
 	}
 
@@ -158,11 +159,13 @@ protected:
 
 	virtual void analyzeTrack( FemtoTrackProxy &_proxy ){
 		
-		int ipt = bins_pt_mlp.findBin( _proxy._track->mPt );
+		int ipt = bins_pt_mva.findBin( _proxy._track->mPt );
+		// LOG_F( INFO, "pt=%f, ipt = %d", _proxy._track->mPt, ipt );
 		if ( ipt < 0 ) return;
 		// if ( ipt != ptIndex ) return;
 
-		MuonMLPFilter &_mlp = mlps[ipt];
+		MuonMVAFilter &_mlp = mlps[ipt];
+		MuonMVAFilter &_bdt = bdts[ipt];
 
 		float classId = 0; // bg
 		
@@ -199,8 +202,9 @@ protected:
 
 		_proxy._mtdPid->mDeltaTimeOfFlight = deltaTof;
 
+		MuonMVAFilter::fillVars( _proxy );
 		float mlpr = _mlp.evaluate( _proxy );
-		float bdtr = bdt.evaluate( _proxy );
+		float bdtr = _bdt.evaluate( _proxy );
 
 
 
