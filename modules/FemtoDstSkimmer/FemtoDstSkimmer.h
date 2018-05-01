@@ -51,11 +51,25 @@ protected:
 	vector<TH1*> sig_deltaTOF_pt;
 	TH1 * sig_deltaTOF_pt_all;
 
+	XmlHistogram kaon_deltaTOF_2d;
+	vector<TH1*> kaon_deltaTOF_pt;
+	TH1 * kaon_deltaTOF_pt_all;
+
+	XmlHistogram proton_deltaTOF_2d;
+	vector<TH1*> proton_deltaTOF_pt;
+	TH1 * proton_deltaTOF_pt_all;
+
+	XmlHistogram bg_dca;
+	XmlHistogram sig_dca;
+
 	HistoBins bins_pt_mva;
 	HistoBins bins_pt_dtof;
+	HistoBins bins_kaon_pt_dtof;
 
 	TNtuple *tuple;
 	TRandom3 r3;
+
+	bool use_bdt = false;
 public:
 	virtual const char* classname() const {return "FemtoDstSkimmer";}
 	FemtoDstSkimmer() {}
@@ -73,17 +87,30 @@ public:
 		// bdt.load( config, nodePath + ".MuonBDTFilter" );
 
 		string path_bg = config.q( nodePath+".DeltaTOF.XmlHistogram{name==bg}" );
+		string path_kaon = config.q( nodePath+".DeltaTOF.XmlHistogram{name==kaon_dtof_vs_pt}" );
+		string path_proton = config.q( nodePath+".DeltaTOF.XmlHistogram{name==proton_dtof_vs_pt}" );
 		string path_sig = config.q( nodePath+".DeltaTOF.XmlHistogram{name==hsignalPdf}" );
+
+
 		
 		LOG_F( INFO, "Loading bg from : %s", path_bg.c_str()  );
+		LOG_F( INFO, "Loading kaon from : %s", path_kaon.c_str()  );
+		LOG_F( INFO, "Loading proton from : %s", path_proton.c_str()  );
 		LOG_F( INFO, "Loading sig from : %s", path_sig.c_str()  );
 
 		bg_deltaTOF.load( config, path_bg );
 		sig_deltaTOF_2d.load( config, path_sig );
+		kaon_deltaTOF_2d.load( config, path_kaon );
+		proton_deltaTOF_2d.load( config, path_proton );
 
-		tuple= new TNtuple( "MvaTree", "mva variables", "classId:dY:dZ:dTof:nsp:nhf:dca:cell:mod:bl:pt:c:bdt:mlp:gid" );
+		bg_dca.load( config, nodePath + ".DCA.XmlHistogram[0]" );
+		sig_dca.load( config, nodePath + ".DCA.XmlHistogram[1]" );
 
 		book->cd();
+		// bg_dca.getTH1()->Write();
+		// sig_dca.getTH1()->Write();
+
+		tuple= new TNtuple( "MvaTree", "mva variables", "classId:dY:dZ:dTof:nsp:nhf:dca:cell:mod:bl:pt:c:bdt:mlp:gid" );
 
 		int seed= config.getInt( "seed", 0 );
 		r3.SetSeed( seed );
@@ -92,24 +119,42 @@ public:
 
 		bins_pt_mva.load( config, "bins.mva_pt" );
 		string mlp_template_str = config.getString( nodePath + ".MuonMVAFilter.WeightsMLP" );
-		string bdt_template_str = config.getString( nodePath + ".MuonMVAFilter.WeightsBDT" );
+		string bdt_template_str = config.getString( nodePath + ".MuonMVAFilter.WeightsBDT", "" );
 
 		/* LOAD THE MLPs */
 		// use this first one to setup the sinlgeton reader and load the variables
 		MuonMVAFilter m_setup;
 		m_setup.loadVars( config, nodePath + ".MuonMVAFilter" );
 
-		for ( size_t i = 0; i < bins_pt_mva.nBins(); i++ ){
+		if ( mlp_template_str.find( "%" ) != string::npos ){
+			for ( size_t i = 0; i < bins_pt_mva.nBins(); i++ ){
+				MuonMVAFilter m;
+				m.load( string( TString::Format( mlp_template_str.c_str(), i ) ), string( TString::Format( "mlp_%zu", i ) ) );
+				mlps.push_back( m );
+			}
+		} else {
 			MuonMVAFilter m;
-			m.load( string( TString::Format( mlp_template_str.c_str(), i ) ), string( TString::Format( "mlp_%zu", i ) ) );
+			m.load( mlp_template_str, "DNN" );
 			mlps.push_back( m );
 		}
 
 		/* LOAD THE BDTs */
-		for ( size_t i = 0; i < bins_pt_mva.nBins(); i++ ){
-			MuonMVAFilter m;
-			m.load( string( TString::Format( bdt_template_str.c_str(), i ) ), string( TString::Format( "bdt_%zu", i ) ) );
-			bdts.push_back( m );
+		if ( bdt_template_str.find( "%" ) != string::npos ){
+			if ( "" != bdt_template_str ){
+				use_bdt = true;
+				for ( size_t i = 0; i < bins_pt_mva.nBins(); i++ ){
+					MuonMVAFilter m;
+					m.load( string( TString::Format( bdt_template_str.c_str(), i ) ), string( TString::Format( "bdt_%zu", i ) ) );
+					bdts.push_back( m );
+				}
+			}
+		} else {
+			if ( "" != bdt_template_str ){
+				use_bdt = true;
+				MuonMVAFilter m;
+				m.load( bdt_template_str, "BDT" );
+				bdts.push_back( m );
+			}
 		}
 
 
@@ -123,17 +168,67 @@ public:
 			LOG_F( 3, "Projecting ( %f -> %f )", bins_pt_dtof.bins[i], bins_pt_dtof.bins[i+1] );
 			TH1 * h1 = h2->ProjectionY( TString::Format( "sig_dtof_pt_%zu", i ), ib1, ib2 );
 			sig_deltaTOF_pt.push_back( h1 );
+			h1->SetTitle( TString::Format( "%0.2f < pT < %0.2f (GeV/c)", bins_pt_dtof.bins[i], bins_pt_dtof.bins[i+1] ) );
 			h1->Write();
 		}
 		sig_deltaTOF_pt_all = h2->ProjectionY( "sig_dtof_pt_all", 1, -1 );
 
-		LOG_F( INFO, "[%d] => pT Range : %f <= pT < %f", ptIndex, bins_pt_mva.bins[ptIndex], bins_pt_mva.bins[ptIndex+1] );
+
+		// build the kaon dtof 1d histos
+		TH2 * kh2 = (TH2*)kaon_deltaTOF_2d.getTH1().get();
+		LOG_F( INFO, "kh2=%p", kh2 );
+		bins_kaon_pt_dtof.load( config, "bins.kaon_dtof_pt" );
+		size_t nKaonPtBinsDtof = bins_kaon_pt_dtof.nBins();
+		for ( size_t i = 0; i < nKaonPtBinsDtof; i++ ){
+			int ib1 = kh2->GetXaxis()->FindBin( bins_kaon_pt_dtof.bins[i] );
+			int ib2 = kh2->GetXaxis()->FindBin( bins_kaon_pt_dtof.bins[i+1] );
+			LOG_F( 3, "Projecting ( %f -> %f )", bins_kaon_pt_dtof.bins[i], bins_kaon_pt_dtof.bins[i+1] );
+			TH1 * h1 = kh2->ProjectionY( TString::Format( "kaon_dtof_pt_%zu", i ), ib1, ib2 );
+			kaon_deltaTOF_pt.push_back( h1 );
+			h1->SetTitle( TString::Format( "%0.2f < pT < %0.2f (GeV/c)", bins_kaon_pt_dtof.bins[i], bins_kaon_pt_dtof.bins[i+1] ) );
+			h1->Write();
+		}
+		kaon_deltaTOF_pt_all = kh2->ProjectionY( "kaon_dtof_pt_all", 1, -1 );
+
+		// build the proton dtof 1d histos
+		TH2 * ph2 = (TH2*)proton_deltaTOF_2d.getTH1().get();
+		LOG_F( INFO, "ph2=%p", ph2 );
+		for ( size_t i = 0; i < nKaonPtBinsDtof; i++ ){
+			int ib1 = ph2->GetXaxis()->FindBin( bins_kaon_pt_dtof.bins[i] );
+			int ib2 = ph2->GetXaxis()->FindBin( bins_kaon_pt_dtof.bins[i+1] );
+			LOG_F( 3, "Projecting ( %f -> %f )", bins_kaon_pt_dtof.bins[i], bins_kaon_pt_dtof.bins[i+1] );
+			TH1 * h1 = ph2->ProjectionY( TString::Format( "proton_dtof_pt_%zu", i ), ib1, ib2 );
+			proton_deltaTOF_pt.push_back( h1 );
+			h1->SetTitle( TString::Format( "%0.2f < pT < %0.2f (GeV/c)", bins_kaon_pt_dtof.bins[i], bins_kaon_pt_dtof.bins[i+1] ) );
+			h1->Write();
+		}
+		proton_deltaTOF_pt_all = kh2->ProjectionY( "kaon_dtof_pt_all", 1, -1 );
+
+		// LOG_F( INFO, "[%d] => pT Range : %f <= pT < %f", ptIndex, bins_pt_mva.bins[ptIndex], bins_pt_mva.bins[ptIndex+1] );
 
 	}
 
 
 protected:
 
+
+	float sample_bg_dca( FemtoTrackProxy &proxy ){
+		float pt = proxy._track->mPt;
+		if ( pt > 14 ) pt = 14;
+		TH2 * hbgdca = ((TH2*)bg_dca.getTH1().get());
+		int ptbin = hbgdca->GetXaxis()->FindBin( pt );
+		TH1 * hbgdcaslice = hbgdca->ProjectionY( "tmp", ptbin, ptbin );
+		return hbgdcaslice->GetRandom();
+	}
+
+	float sample_sig_dca( FemtoTrackProxy &proxy ){
+		float pt = proxy._track->mPt;
+		if ( pt > 14 ) pt = 14;
+		TH2 * hsigdca = ((TH2*)sig_dca.getTH1().get());
+		int ptbin = hsigdca->GetXaxis()->FindBin( pt );
+		TH1 * hsigdcaslice = hsigdca->ProjectionY( "tmp", ptbin, ptbin );
+		return hsigdcaslice->GetRandom();
+	}
 
 	float sample_bg_deltaTOF( ){
 		return bg_deltaTOF.getTH1().get()->GetRandom();
@@ -152,6 +247,30 @@ protected:
 		return sig_deltaTOF_pt_all->GetRandom();
 	} 
 
+	float sample_kaon_deltaTOF( FemtoTrackProxy &proxy ){
+		LOG_F( 3, "pT=%f ", proxy._track->mPt );
+
+		int ib = bins_kaon_pt_dtof.findBin( proxy._track->mPt );
+		LOG_F( 3, "ib=%d", ib );
+		if ( ib < kaon_deltaTOF_pt.size() && ib >= 0){
+			LOG_F( 3, "h1: %s", kaon_deltaTOF_pt[ib]->GetName() );
+			return kaon_deltaTOF_pt[ib]->GetRandom();
+		}
+		return kaon_deltaTOF_pt_all->GetRandom();
+	} 
+
+	float sample_proton_deltaTOF( FemtoTrackProxy &proxy ){
+		LOG_F( 3, "pT=%f ", proxy._track->mPt );
+
+		int ib = bins_kaon_pt_dtof.findBin( proxy._track->mPt );
+		LOG_F( 3, "ib=%d", ib );
+		if ( ib < proton_deltaTOF_pt.size() && ib >= 0){
+			LOG_F( 3, "h1: %s", proton_deltaTOF_pt[ib]->GetName() );
+			return proton_deltaTOF_pt[ib]->GetRandom();
+		}
+		return proton_deltaTOF_pt_all->GetRandom();
+	} 
+
 	virtual void preEventLoop(){
 		TreeAnalyzer::preEventLoop();
 		book->cd();
@@ -165,7 +284,10 @@ protected:
 		// if ( ipt != ptIndex ) return;
 
 		MuonMVAFilter &_mlp = mlps[ipt];
-		MuonMVAFilter &_bdt = bdts[ipt];
+		MuonMVAFilter *_bdt = &mlps[ipt];
+
+		if ( use_bdt )
+			_bdt = &bdts[ipt];
 
 		float classId = 0; // bg
 		
@@ -195,8 +317,27 @@ protected:
 			float sdtof = sample_sig_deltaTOF( _proxy );
 			// book->fill( "signal_dtof", sdtof );
 			deltaTof = sdtof;
+		} else if ( isKaon( _proxy._mcTrack ) ){
+			float kdtof = sample_kaon_deltaTOF( _proxy );
+			deltaTof = kdtof;
+			classId = 10;
+		} else if ( isProton( _proxy._mcTrack ) ){
+			float pdtof = sample_proton_deltaTOF( _proxy );
+			deltaTof = pdtof;
+			classId = 11;
 		} else {
 			deltaTof = sample_bg_deltaTOF( );
+		}
+
+
+		/************************************
+		* Sample dca distribution for sig/bg
+		************************************/
+		if ( isSignal( _proxy._mcTrack ) ){
+			_proxy._track->gDCA( sample_sig_dca( _proxy ) );
+		}
+		 else {
+			_proxy._track->gDCA( sample_bg_dca( _proxy ) );
 		}
 
 
@@ -204,7 +345,9 @@ protected:
 
 		MuonMVAFilter::fillVars( _proxy );
 		float mlpr = _mlp.evaluate( _proxy );
-		float bdtr = _bdt.evaluate( _proxy );
+		float bdtr = 0;
+		if ( use_bdt  )
+			bdtr = _bdt->evaluate( _proxy );
 
 
 
@@ -284,6 +427,22 @@ protected:
 		if ( nullptr == mcTrack )
 			return false;
 		if ( 5 == mcTrack->mGeantPID || 6 == mcTrack->mGeantPID )
+			return true;
+		return false;
+	}
+
+	bool isKaon( FemtoMcTrack *mcTrack ){
+		if ( nullptr == mcTrack )
+			return false;
+		if ( 11 == mcTrack->mGeantPID || 12 == mcTrack->mGeantPID )
+			return true;
+		return false;
+	}
+
+	bool isProton( FemtoMcTrack *mcTrack ){
+		if ( nullptr == mcTrack )
+			return false;
+		if ( 14 == mcTrack->mGeantPID || 15 == mcTrack->mGeantPID )
 			return true;
 		return false;
 	}

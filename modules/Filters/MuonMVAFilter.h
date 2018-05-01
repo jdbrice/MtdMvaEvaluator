@@ -64,8 +64,10 @@ public:
 	}
 
 	static float fillVars(FemtoTrackProxy &_proxy){
-		if (nullptr == _proxy._mtdPid)
-			return -1;
+		if (nullptr == _proxy._mtdPid || nullptr == _proxy._track ){
+			LOG_F( WARNING, "NULL proxy" );
+			return 0.0;
+		} 
 
 		MVA_dY = _proxy._mtdPid->mDeltaY;
 		MVA_dZ = _proxy._mtdPid->mDeltaZ;
@@ -85,6 +87,10 @@ public:
 		MVA_Charge = (Float_t)_proxy._track->charge();
 
 		MVA_dY *= MVA_Charge;
+		MVA_Cell = (MVA_Cell + 1) * MVA_Charge;
+
+
+
 
 		// LOG_F(INFO, "MVA_dY=%f", MVA_dY);
 		// LOG_F(INFO, "MVA_dZ=%f", MVA_dZ);
@@ -137,7 +143,7 @@ public:
 			if ( hasVar( "dca" ) )
 				reader->AddVariable( "dca := Tracks_mDCA", &MVA_DCA );
 			if ( hasVar( "Cell" ) )
-				reader->AddVariable( "Cell := MtdPidTraits_mCell", &MVA_Cell );
+				reader->AddVariable( "Cell := ((MtdPidTraits_mCell+1) * Tracks_mCharge)", &MVA_Cell );
 			if ( hasVar( "Module" ) )
 				reader->AddVariable( "Module := MtdPidTraits_mModule", &MVA_Module );
 			if ( hasVar( "BL" ) )
